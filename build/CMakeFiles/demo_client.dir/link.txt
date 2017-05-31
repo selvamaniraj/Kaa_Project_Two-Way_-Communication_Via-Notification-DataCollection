@@ -1,0 +1,1 @@
+/usr/bin/cc   -std=c99 -g -Wall -Wextra -g   CMakeFiles/demo_client.dir/src/kaa_demo.c.o CMakeFiles/demo_client.dir/src/dht11/dht11.c.o  -o demo_client -rdynamic client-c/build/libkaac.so -lwiringPi -lpthread -lssl -lcrypto -Wl,-rpath,/home/pi/Desktop/Date/build/client-c/build: 

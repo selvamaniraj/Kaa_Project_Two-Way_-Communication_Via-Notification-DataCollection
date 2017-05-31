@@ -1,0 +1,16 @@
+/home/pi/Desktop/Date/build/CMakeFiles/edit_cache.dir
+/home/pi/Desktop/Date/build/CMakeFiles/install/strip.dir
+/home/pi/Desktop/Date/build/CMakeFiles/rebuild_cache.dir
+/home/pi/Desktop/Date/build/CMakeFiles/install.dir
+/home/pi/Desktop/Date/build/CMakeFiles/install/local.dir
+/home/pi/Desktop/Date/build/CMakeFiles/list_install_components.dir
+/home/pi/Desktop/Date/build/CMakeFiles/demo_client.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/rebuild_cache.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/list_install_components.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/install.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/install/local.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/kaac.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/edit_cache.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/install/strip.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/kaac_s.dir
+/home/pi/Desktop/Date/build/client-c/build/CMakeFiles/kaac_o.dir

@@ -1,0 +1,301 @@
+/*
+ * Kaa_Demo.c
+ *
+ *  Created on: 20-Feb-2017
+ *      Author: ethicsXubuntu
+ */
+
+
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/time.h>
+#include <stdlib.h>
+#include <kaa/kaa_error.h>
+#include <kaa/kaa_context.h>
+#include <kaa/platform/kaa_client.h>
+#include <kaa/utilities/kaa_log.h>
+#include <kaa/kaa_logging.h>
+#include <kaa/platform-impl/common/ext_log_upload_strategies.h>
+
+/*
+ *
+ * notification header files
+*/
+
+#include <stdbool.h>
+#include <kaa/kaa_notification_manager.h>
+/*
+ * header file for wiring pi in Rpi
+ */
+
+#include <wiringPi.h>
+#include "dht11/dht11.h"
+
+#define DHT11_PIN    7
+#define DHTBUTTON_PIN 17
+
+#define LEN 150
+#define MAX_LOG_BUCKET_SIZE     SIZE_MAX
+#define MAX_LOG_COUNT                 5
+
+#define KAA_DEMO_UPLOAD_COUNT_THRESHOLD      1 /* Count of collected logs needed to initiate log upload */
+#define KAA_DEMO_LOG_GENERATION_FREQUENCY    1 /* In seconds */
+
+
+
+#define KAA_DEMO_UNUSED(x) (void)(x);
+
+#define KAA_DEMO_RETURN_IF_ERROR(error, message) \
+    if ((error)) { \
+        printf(message ", error code %d\n", (error)); \
+        return (error); \
+    }
+
+
+static kaa_client_t *kaa_client = NULL;
+/*
+*
+* receive data's from kaa server and also stroe on file
+*
+*/
+void on_notification(void *context, uint64_t *topic_id,
+		kaa_notification_t *notification) {
+	KAA_DEMO_UNUSED(context);
+	if (notification->message->type
+			== KAA_NOTIFICATION_UNION_STRING_OR_NULL_BRANCH_0) {
+		kaa_string_t *message = (kaa_string_t *) notification->message->data;
+		printf("Notification for topic id '%llu' received\n", *topic_id);
+		printf("Notification body: %s\n", message->data);
+		FILE *fbtr;
+		fbtr = (fopen("/home/pi/Desktop/Date/selva.txt", "w"));
+		if (fbtr == NULL) {
+			printf("Error!");
+			return;
+		}
+		fputs(message->data, fbtr);
+		fclose(fbtr);
+
+	} else {
+		printf("Error:Received notification's body is null\n");
+	}
+}
+/*
+*
+* listen the topics from server
+*
+*/
+void show_topics(kaa_list_t *topics) {
+	if (!topics || !kaa_list_get_size(topics)) {
+		printf("Topic list is empty");
+		return;
+	}
+
+	kaa_list_node_t *it = kaa_list_begin(topics);
+	while (it) {
+		kaa_topic_t *topic = (kaa_topic_t *) kaa_list_get_data(it);
+		printf("Topic: id '%llu', name: %s, type: ", topic->id, topic->name);
+		if (topic->subscription_type == MANDATORY_SUBSCRIPTION) {
+			printf("MANDATORY\n");
+		} else {
+			printf("OPTIONAL\n");
+		}
+		it = kaa_list_next(it);
+	}
+}
+/*
+*
+*subscribing the topic in notification manger
+*
+*/
+void on_topics_received(void *context, kaa_list_t *topics) {
+	printf("Topic list was updated\n");
+	show_topics(topics);
+
+	kaa_error_t err = KAA_ERR_NONE;
+	kaa_client_t *client = (kaa_client_t *) context;
+	kaa_list_node_t *it = kaa_list_begin(topics);
+	while (it) {
+		kaa_topic_t *topic = (kaa_topic_t *) kaa_list_get_data(it);
+		if (topic->subscription_type == OPTIONAL_SUBSCRIPTION) {
+			printf("Subscribing to optional topic '%llu'\n", topic->id);
+			err = kaa_subscribe_to_topic(
+					kaa_client_get_context(client)->notification_manager,
+					&topic->id, false);
+			if (err) {
+				printf("Failed to subscribe.\n");
+			}
+		}
+		it = kaa_list_next(it);
+	}
+	err = kaa_sync_topic_subscriptions(
+			kaa_client_get_context(kaa_client)->notification_manager);
+	if (err) {
+		printf("Failed to sync subscriptions\n");
+	}
+}
+
+int doprocessNotifications() {
+	kaa_topic_listener_t topic_listener = { &on_topics_received, kaa_client };
+	kaa_notification_listener_t notification_listener = { &on_notification,
+			kaa_client };
+
+	uint32_t topic_listener_id = 0;
+	uint32_t notification_listener_id = 0;
+
+	kaa_error_t error_code = kaa_add_topic_list_listener(
+			kaa_client_get_context(kaa_client)->notification_manager,
+			&topic_listener, &topic_listener_id);
+
+	KAA_DEMO_RETURN_IF_ERROR(error_code, "Failed add topic listener");
+
+	error_code = kaa_add_notification_listener(
+			kaa_client_get_context(kaa_client)->notification_manager,
+			&notification_listener, &notification_listener_id);
+
+	KAA_DEMO_RETURN_IF_ERROR(error_code, "Failed add notification listener");
+
+	return error_code;
+}
+
+extern kaa_error_t ext_unlimited_log_storage_create(
+		void **log_storage_context_p, kaa_logger_t *logger);
+
+
+/*
+*
+*collect the data's from dht 11.c and also upload the data's to server
+*
+*/
+static void kaa_demo_add_log_record(void *context) {
+	static size_t log_record_counter = 0;
+
+	const char *charbutton = dhtbutton_read_val(DHTBUTTON_PIN);
+	int intbuttonPressCount = dhtbutton_pressCount_val();
+
+	char *timeval = time_value();
+
+	if (charbutton == "0") {
+		printf("Failed to read data from sensor button\n");
+		return;
+	}
+
+	++log_record_counter;
+
+	kaa_logging_payload_t *log_record_payload = kaa_logging_payload_create();
+	if (!log_record_payload) {
+		printf("Failed to create log record for payload, error code %d\n",
+				KAA_ERR_NOMEM);
+		return;
+	}
+	char button[80];
+	sprintf(button, "%d", intbuttonPressCount);
+
+
+/*
+*
+*uploading the data kaa payload-string name->send the data's to kaa server
+*
+*/
+	log_record_payload->monoff = kaa_string_copy_create(charbutton);
+	log_record_payload->monoffcount = kaa_string_copy_create(button);
+	log_record_payload->mgpslat = kaa_string_copy_create("12.937768");
+	log_record_payload->mgpslong = kaa_string_copy_create("80.182096");
+	log_record_payload->msensor = kaa_string_copy_create("1");
+	log_record_payload->mtsensor = kaa_string_copy_create("24");
+	log_record_payload->mpotv = kaa_string_copy_create("18");
+	log_record_payload->mlightonoff = kaa_string_copy_create(charbutton);
+
+	log_record_payload->msgtimev = kaa_string_copy_create(timeval);
+
+
+	kaa_logging_device_data_t *log_record = kaa_logging_device_data_create();
+	if (!log_record) {
+		printf("Failed to create log record for sensordata, error code %d\n",
+				KAA_ERR_NOMEM);
+		return;
+	}
+	log_record->channel = kaa_string_copy_create("TEMP");
+	log_record->message = log_record_payload;
+
+
+	kaa_error_t error_code = kaa_logging_add_record(
+			kaa_client_get_context((kaa_client_t *) context)->log_collector,
+			log_record, NULL);
+	if (error_code) {
+		printf("Failed to add log record, error code %d\n", error_code);
+	}
+
+	log_record->destroy(log_record);
+}
+
+/**
+* Configure Kaa data collection module.
+*/
+int doprocessCollectionDataFromkaa() {
+	void *log_storage_context = NULL;
+	void *log_upload_strategy_context = NULL;
+
+	if (wiringPiSetupGpio() == -1) {
+		printf("Failed to initialize Pi wiring\n");
+		//TODO workout here not exit the program handle the error on collection demo.
+		exit(1);
+	}
+
+	kaa_error_t error_code  = ext_unlimited_log_storage_create(&log_storage_context,
+				kaa_client_get_context(kaa_client)->logger);
+		KAA_DEMO_RETURN_IF_ERROR(error_code,
+				"Failed to create unlimited log storage");
+
+		error_code = ext_log_upload_strategy_create(
+				kaa_client_get_context(kaa_client), &log_upload_strategy_context,
+				KAA_LOG_UPLOAD_VOLUME_STRATEGY);
+		KAA_DEMO_RETURN_IF_ERROR(error_code, "Failed to create log upload strategy");
+
+		error_code = ext_log_upload_strategy_set_threshold_count(
+				log_upload_strategy_context, KAA_DEMO_UPLOAD_COUNT_THRESHOLD);
+		KAA_DEMO_RETURN_IF_ERROR(error_code,
+				"Failed to set threshold log record count");
+
+		kaa_log_bucket_constraints_t bucket_sizes = { .max_bucket_size =
+		MAX_LOG_BUCKET_SIZE, .max_bucket_log_count = MAX_LOG_COUNT, };
+
+		error_code = kaa_logging_init(
+				kaa_client_get_context(kaa_client)->log_collector,
+				log_storage_context, log_upload_strategy_context, &bucket_sizes);
+		KAA_DEMO_RETURN_IF_ERROR(error_code, "Failed to init Kaa log collector");
+
+		return error_code;
+}
+
+
+
+
+int main() {
+	/**
+	 * Initialize Kaa client.
+	 */
+	kaa_error_t error_code = kaa_client_create(&kaa_client, NULL);
+	KAA_DEMO_RETURN_IF_ERROR(error_code, "Failed create Kaa client");
+
+	//TODO here call notification function
+	error_code = doprocessNotifications();
+
+	//TODO here call data collection function here.
+	error_code =doprocessCollectionDataFromkaa();
+
+	/**
+	 * Start Kaa client main loop.
+	 */
+	error_code = kaa_client_start(kaa_client, &kaa_demo_add_log_record,
+			(void *) kaa_client, KAA_DEMO_LOG_GENERATION_FREQUENCY);
+
+	KAA_DEMO_RETURN_IF_ERROR(error_code, "Failed to start Kaa main loop");
+
+	/**
+	 * Destroy Kaa client.
+	 */
+	kaa_client_destroy(kaa_client);
+
+	return error_code;
+}
